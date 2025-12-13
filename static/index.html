@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SIA - Acesso Restrito</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f0f2f5; color: #333; }
+        
+        /* Layout de Login */
+        .login-wrapper { display: flex; justify-content: center; align-items: center; height: 100vh; background: #2c3e50; }
+        .login-box { background: white; padding: 40px; border-radius: 8px; width: 300px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .login-box input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        
+        /* Layout do Sistema */
+        header { background: #2c3e50; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .container { max-width: 1000px; margin: 20px auto; padding: 20px; background: white; border-radius: 8px; }
+        
+        .btn { padding: 10px 15px; border: none; cursor: pointer; border-radius: 5px; color: white; font-weight: bold; }
+        .btn-primary { background: #3498db; }
+        .btn-success { background: #27ae60; }
+        .btn-danger { background: #e74c3c; }
+        .btn-secondary { background: #95a5a6; }
+        .full-width { width: 100%; margin-top: 10px; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 12px; }
+        th { background: #f8f9fa; text-align: left; }
+        tr:hover { background: #f1f1f1; cursor: pointer; }
+
+        .hidden { display: none !important; }
+        .link { color: #3498db; cursor: pointer; text-decoration: underline; font-size: 0.9em; }
+
+        @media print {
+            header, .no-print { display: none; }
+            .container { box-shadow: none; margin: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="tela-login" class="login-wrapper">
+    <div class="login-box">
+        <h2 id="titulo-login">🔐 SIA Auditoria</h2>
+        <input type="text" id="userLogin" placeholder="Usuário">
+        <input type="password" id="passLogin" placeholder="Senha">
+        
+        <button class="btn btn-primary full-width" onclick="fazerLogin()" id="btn-entrar">Entrar</button>
+        <button class="btn btn-success full-width hidden" onclick="registrar()" id="btn-cadastrar">Criar Conta</button>
+        
+        <p style="margin-top: 15px;">
+            <span id="msg-troca">Não tem conta?</span> 
+            <span class="link" onclick="alternarModoLogin()">Clique aqui</span>
+        </p>
+        <p id="erro-login" style="color: red; font-size: 0.9em;"></p>
+    </div>
+</div>
+
+<div id="sistema-principal" class="hidden">
+    <header>
+        <h1>🏛️ SIA - Portal do Auditor</h1>
+        <div>
+            <span>Auditor: <strong id="header-user">...</strong></span> | 
+            <a href="#" style="color: #bdc3c7;" onclick="sair()">Sair</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <div id="view-dashboard">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>Meus Relatórios</h2>
+                <button class="btn btn-primary" onclick="irNovaAuditoria()">+ Nova Auditoria</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                    <th>Cód. Protocolo</th>
+                    <th>Data</th>
+                    <th>Site</th>
+                    <th>Auditor</th> <th>Ação</th>
+                </tr>
+              </thead>
+                <tbody id="lista-relatorios"></tbody>
+            </table>
+        </div>
+
+        <div id="view-nova" class="hidden" style="text-align: center; padding: 40px;">
+            <h2>🔍 Nova Varredura</h2>
+            <input type="text" id="urlInput" style="width: 60%; padding: 10px;" placeholder="URL do Portal (ex: www.salvador.ba.gov.br)">
+            <br><br>
+            <button class="btn btn-success" onclick="executarAuditoria()">Iniciar Robô</button>
+            <button class="btn btn-secondary" onclick="voltarDashboard()">Cancelar</button>
+            <p id="loading" class="hidden">⚙️ Processando...</p>
+        </div>
+
+        <div id="view-detalhes" class="hidden">
+            <div class="no-print" style="margin-bottom: 20px;">
+                <button class="btn btn-secondary" onclick="voltarDashboard()">Voltar</button>
+                <button class="btn btn-primary" onclick="window.print()">Imprimir</button>
+                <button class="btn btn-success" onclick="baixarJSON()">JSON</button>
+            </div>
+            <div style="border-bottom: 2px solid #333;">
+                <h3>RELATÓRIO DE CONFORMIDADE #<span id="det-codigo"></span></h3>
+                <p><strong>Site:</strong> <span id="det-url"></span> | <strong>Data:</strong> <span id="det-data"></span></p>
+            </div>
+            <table id="tabela-detalhes"></table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // === ESTADO DO USUÁRIO ===
+    let usuarioAtual = null; // { id: 1, username: 'Fulano' }
+    let modoCadastro = false;
+    let relatorioAtual = null;
+
+    // === INICIALIZAÇÃO ===
+    window.onload = function() {
+        const salvo = localStorage.getItem('sia_user');
+        if (salvo) {
+            usuarioAtual = JSON.parse(salvo);
+            entrarNoSistema();
+        }
+    };
+
+    // === LÓGICA DE LOGIN/REGISTRO ===
+    function alternarModoLogin() {
+        modoCadastro = !modoCadastro;
+        const titulo = document.getElementById('titulo-login');
+        const btnEntrar = document.getElementById('btn-entrar');
+        const btnCad = document.getElementById('btn-cadastrar');
+        const msg = document.getElementById('msg-troca');
+
+        if (modoCadastro) {
+            titulo.innerText = "Novo Auditor";
+            btnEntrar.classList.add('hidden');
+            btnCad.classList.remove('hidden');
+            msg.innerText = "Já tem conta?";
+        } else {
+            titulo.innerText = "SIA Auditoria";
+            btnEntrar.classList.remove('hidden');
+            btnCad.classList.add('hidden');
+            msg.innerText = "Não tem conta?";
+        }
+        document.getElementById('erro-login').innerText = "";
+    }
+
+    async function registrar() {
+        const u = document.getElementById('userLogin').value;
+        const p = document.getElementById('passLogin').value;
+        
+        const res = await fetch('/api/registrar', {
+            method: 'POST',
+            body: JSON.stringify({ usuario: u, senha: p })
+        });
+        
+        if (res.ok) {
+            alert("Cadastro realizado! Faça login.");
+            alternarModoLogin();
+        } else {
+            document.getElementById('erro-login').innerText = "Erro ao criar conta.";
+        }
+    }
+
+    async function fazerLogin() {
+        const u = document.getElementById('userLogin').value;
+        const p = document.getElementById('passLogin').value;
+
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            body: JSON.stringify({ usuario: u, senha: p })
+        });
+
+        if (res.ok) {
+            usuarioAtual = await res.json();
+            localStorage.setItem('sia_user', JSON.stringify(usuarioAtual));
+            entrarNoSistema();
+        } else {
+            document.getElementById('erro-login').innerText = "Usuário ou senha inválidos.";
+        }
+    }
+
+    function entrarNoSistema() {
+        document.getElementById('tela-login').classList.add('hidden');
+        document.getElementById('sistema-principal').classList.remove('hidden');
+        
+        // Verifica se é admin
+        let nomeDisplay = usuarioAtual.username;
+        if (usuarioAtual.is_admin) {
+            nomeDisplay += " (ADMINISTRADOR)";
+            // Opcional: Mudar a cor do header para vermelho ou dourado
+            document.querySelector('header').style.background = '#c0392b'; 
+        } else {
+            document.querySelector('header').style.background = '#2c3e50';
+        }
+
+        document.getElementById('header-user').innerText = nomeDisplay;
+        carregarDashboard();
+    }
+
+    function sair() {
+        localStorage.removeItem('sia_user');
+        location.reload();
+    }
+
+    // === SISTEMA (DASHBOARD) ===
+    // === SISTEMA (DASHBOARD) ===
+    async function carregarDashboard() {
+        // Busca os relatórios (o backend decide se manda tudo ou só os meus, baseado no user_id)
+        const res = await fetch(`/api/historico?user_id=${usuarioAtual.id}`);
+        const lista = await res.json();
+        
+        const tbody = document.getElementById('lista-relatorios');
+        tbody.innerHTML = '';
+
+        if (!lista || lista.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5">Nenhum relatório encontrado.</td></tr>'; // Note que mudei colspan para 5
+            return;
+        }
+
+        lista.forEach(item => {
+            const tr = document.createElement('tr');
+            
+            // Destaque visual: Se for Admin vendo relatório de outro, destaca o nome
+            let estiloAuditor = "color: #555;";
+            if(usuarioAtual.is_admin && item.usuario !== usuarioAtual.username) {
+                estiloAuditor = "color: #d35400; font-weight:;"; // Laranja se for de outro auditor
+            }
+
+            tr.innerHTML = `
+                <td><strong>${item.codigo}</strong></td>
+                <td>${item.data}</td>
+                <td>${item.url}</td>
+                <td style="${estiloAuditor}">${item.usuario}</td> <td><button class="btn btn-secondary btn-sm">Abrir</button></td>
+            `;
+            
+            tr.onclick = () => abrirRelatorio(item.id);
+            tbody.appendChild(tr);
+        });
+    }
+
+    // === SISTEMA (NOVA AUDITORIA) ===
+    function irNovaAuditoria() {
+        esconderViews();
+        document.getElementById('view-nova').classList.remove('hidden');
+    }
+
+    async function executarAuditoria() {
+        const url = document.getElementById('urlInput').value;
+        if (!url) return alert("Digite a URL");
+        
+        document.getElementById('loading').classList.remove('hidden');
+
+        try {
+            const res = await fetch('/api/auditar', {
+                method: 'POST',
+                // Envia o user_id junto com a URL
+                body: JSON.stringify({ url: url, user_id: usuarioAtual.id })
+            });
+            
+            if (!res.ok) throw new Error("Erro na auditoria");
+            
+            const relatorio = await res.json();
+            mostrarDetalhes(relatorio);
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            document.getElementById('loading').classList.add('hidden');
+        }
+    }
+
+    // === SISTEMA (DETALHES) ===
+    async function abrirRelatorio(id) {
+        const res = await fetch(`/api/relatorio?id=${id}`);
+        if(res.ok) {
+            const dados = await res.json();
+            mostrarDetalhes(dados);
+        }
+    }
+
+    function mostrarDetalhes(dados) {
+        relatorioAtual = dados;
+        esconderViews();
+        document.getElementById('view-detalhes').classList.remove('hidden');
+
+        document.getElementById('det-codigo').innerText = dados.codigo;
+        document.getElementById('det-url').innerText = dados.url_alvo;
+        document.getElementById('det-data').innerText = dados.data;
+
+        const table = document.getElementById('tabela-detalhes');
+        table.innerHTML = `<tr><th>Item</th><th>Status</th><th>Link</th></tr>`;
+        
+        dados.itens.forEach(item => {
+            const row = document.createElement('tr');
+            const cor = item.status === 'ENCONTRADO' ? '#d4edda' : '#f8d7da';
+            const link = item.status === 'ENCONTRADO' ? `<a href="${item.url_encontrada}" target="_blank">Acessar</a>` : '-';
+            
+            row.innerHTML = `
+                <td>${item.item_procurado.toUpperCase()}</td>
+                <td style="background:${cor}; font-weight:bold;">${item.status}</td>
+                <td>${link}</td>
+            `;
+            table.appendChild(row);
+        });
+    }
+
+    function baixarJSON() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(relatorioAtual, null, 4));
+        const a = document.createElement('a');
+        a.href = dataStr;
+        a.download = `auditoria_${relatorioAtual.codigo}.json`;
+        a.click();
+    }
+
+    // Navegação Interna
+    function voltarDashboard() {
+        esconderViews();
+        document.getElementById('view-dashboard').classList.remove('hidden');
+        carregarDashboard();
+    }
+
+    function esconderViews() {
+        document.getElementById('view-dashboard').classList.add('hidden');
+        document.getElementById('view-nova').classList.add('hidden');
+        document.getElementById('view-detalhes').classList.add('hidden');
+    }
+</script>
+
+</body>
+</html>
