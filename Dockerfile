@@ -1,5 +1,6 @@
 # Estágio 1: Construção (Build)
-FROM golang:1.23-alpine AS builder
+# MUDANÇA AQUI: Atualizamos para 1.25 para bater com o seu go.mod
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -21,7 +22,7 @@ WORKDIR /root/
 # Copia o executável do estágio anterior
 COPY --from=builder /app/main .
 
-# IMPORTANTE: Copia a pasta static (HTML/JS) para a imagem final
+# Copia a pasta static (HTML/JS) para a imagem final
 COPY --from=builder /app/static ./static
 
 # Comando para rodar
