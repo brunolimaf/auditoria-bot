@@ -1,29 +1,28 @@
-# Estágio 1: Construção (Build)
-# MUDANÇA AQUI: Atualizamos para 1.25 para bater com o seu go.mod
+# Estágio 1: Construção
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Copia os arquivos de dependência
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copia o código fonte
 COPY . .
 
-# Compila o executável chamado "main"
 RUN go build -o main .
 
-# Estágio 2: Execução (Imagem leve)
+# Estágio 2: Execução
 FROM alpine:latest
 
 WORKDIR /root/
 
-# Copia o executável do estágio anterior
-COPY --from=builder /app/main .
+# === MUDANÇA AQUI: Instalamos o tzdata ===
+RUN apk add --no-cache tzdata
+# =========================================
 
-# Copia a pasta static (HTML/JS) para a imagem final
+COPY --from=builder /app/main .
 COPY --from=builder /app/static ./static
 
-# Comando para rodar
+# Define a variável de ambiente para o Linux já acordar no Brasil
+ENV TZ=America/Sao_Paulo
+
 CMD ["./main"]

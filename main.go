@@ -6,33 +6,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand" // <--- Importante para gerar números aleatórios
+	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
-	"os"
-
 	"github.com/PuerkitoBio/goquery"
 	_ "github.com/lib/pq"
-	"golang.org/x/crypto/bcrypt" // <--- Adicione este
+	"golang.org/x/crypto/bcrypt"
 )
 
 var db *sql.DB
+
+// === ESTRUTURAS DE DADOS ===
 
 type Credenciais struct {
 	Usuario string `json:"usuario"`
 	Senha   string `json:"senha"`
 }
-
-// Matriz de Auditoria (Itens que o robô procura)
-//var itensObrigatorios = []string{
-//	"licitações", "contratos", "despesas", "receitas",
-//	"folha de pagamento", "diárias", "sic", "ouvidoria",
-//}
-
-// === ESTRUTURAS DE DADOS (JSON) ===
 
 type ResultadoItem struct {
 	ItemProcurado string `json:"item_procurado"`
@@ -42,30 +35,40 @@ type ResultadoItem struct {
 
 type RelatorioFinal struct {
 	Id      int             `json:"id"`
-	Codigo  string          `json:"codigo"` // <--- NOVO CAMPO (ex: 2025AB1020)
+	Codigo  string          `json:"codigo"`
 	UrlAlvo string          `json:"url_alvo"`
 	Data    string          `json:"data"`
 	Itens   []ResultadoItem `json:"itens"`
 }
 
+// ==========================================
+// ===             MAIN                   ===
+// ==========================================
+
 func main() {
-	// 0. Semente
+	// 0. Semente Aleatória
 	rand.Seed(time.Now().UnixNano())
 
-	// 1. Conexão com Banco de Dados (Inteligente)
-	// Se tiver a variável DATABASE_URL (nuvem), usa ela. Se não, usa a local.
+	// 1. Configura Fuso Horário (Brasília)
+	loc, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		loc = time.Local
+		fmt.Println("Aviso: Fuso horário SP não carregado, usando local do sistema.")
+	}
+	time.Local = loc // Define globalmente para o Go
+
+	// 2. Conexão com Banco de Dados (Nuvem ou Local)
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
 		connStr = "postgres://auditor:senha_segura@127.0.0.1:5432/auditoria_db?sslmode=disable"
 	}
 
-	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Tenta reconectar algumas vezes (o banco na nuvem pode demorar pra acordar)
+	// Tenta conectar (Retry logic para nuvem)
 	for i := 0; i < 5; i++ {
 		if err = db.Ping(); err == nil {
 			break
@@ -73,35 +76,37 @@ func main() {
 		time.Sleep(2 * time.Second)
 	}
 
-	// 2. Cria tabelas
+	// Força o Banco a trabalhar no horário de Brasília
+	db.Exec("SET TIME ZONE 'America/Sao_Paulo'")
+
+	// 3. Inicializa Tabelas e Dados Padrão
 	criarTabelas()
 
-	// 3. Configura Servidor
+	// 4. Configura Servidor de Arquivos (Frontend)
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
-	// 4. Rotas
+	// 5. Rotas da API
 	http.HandleFunc("/api/auditar", auditarHandler)
 	http.HandleFunc("/api/historico", historicoHandler)
 	http.HandleFunc("/api/relatorio", relatorioDetalhesHandler)
 	http.HandleFunc("/api/registrar", registrarHandler)
 	http.HandleFunc("/api/login", loginHandler)
-	//http.HandleFunc("/api/excluir", excluirHandler) // NÃO IMPLEMENTADA!
+	// Rota de excluir removida conforme solicitado
 
-	// 5. Porta Dinâmica (O Render define a porta na variável PORT)
+	// 6. Define Porta (Render usa a env PORT)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
 	fmt.Println("🔥 Sistema Auditor SIA rodando na porta:", port)
-	// Atenção: Mudei para usar a variável 'port'
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
-// ====================== //
-// === AUTENTICAÇÃO ===
-// ====================== //
+// ==========================================
+// ===           AUTENTICAÇÃO             ===
+// ==========================================
 
 func registrarHandler(w http.ResponseWriter, r *http.Request) {
 	var creds Credenciais
@@ -109,7 +114,6 @@ func registrarHandler(w http.ResponseWriter, r *http.Request) {
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte(creds.Senha), 10)
 
-	// Tenta inserir. Se der erro (ex: usuario duplicado), avisa.
 	_, err := db.Exec("INSERT INTO usuarios (username, password_hash) VALUES ($1, $2)", creds.Usuario, string(hash))
 	if err != nil {
 		http.Error(w, "Erro: Usuário já existe ou dados inválidos", 400)
@@ -124,9 +128,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	var id int
 	var hashSalvo, username string
-	var isAdmin bool // <--- Variável nova
+	var isAdmin bool
 
-	// Busca o usuário e a flag is_admin
 	err := db.QueryRow("SELECT id, username, password_hash, is_admin FROM usuarios WHERE username=$1", creds.Usuario).Scan(&id, &username, &hashSalvo, &isAdmin)
 	if err != nil {
 		http.Error(w, "Usuário não encontrado", 401)
@@ -137,7 +140,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":       id,
 			"username": username,
-			"is_admin": isAdmin, // <--- Envia pro frontend
+			"is_admin": isAdmin,
 		})
 	} else {
 		http.Error(w, "Senha incorreta", 401)
@@ -145,7 +148,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // ==========================================
-// ===  LÓGICA DE NEGÓCIO (HANDLERS)      ===
+// ===       LÓGICA DE AUDITORIA          ===
 // ==========================================
 
 // ROTA 1: CRIAR NOVA AUDITORIA (POST)
@@ -161,25 +164,18 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&requestData)
 
-	// === CORREÇÃO DE ENTRADA (Input Flexível) ===
+	// Limpeza e correção da URL
 	inputUrl := strings.TrimSpace(requestData.Url)
-
-	// Se não tiver http nem https, assume https por padrão
 	if !strings.HasPrefix(inputUrl, "http://") && !strings.HasPrefix(inputUrl, "https://") {
 		inputUrl = "https://" + inputUrl
 	}
-
-	// Atualiza a variável para usar a URL corrigida
 	requestData.Url = inputUrl
 
 	fmt.Println("Iniciando auditoria em:", requestData.Url)
 
-	// ... (O resto da função continua igual: chama realizarAuditoria, gera código, salva no banco...)
-	// Apenas certifique-se de passar 'requestData.Url' (a corrigida) para as funções abaixo.
-
+	// Executa o Robô
 	itensResultado, err := realizarAuditoria(requestData.Url)
 	if err != nil {
-		// Loga o erro no terminal para você ver o detalhe
 		fmt.Println("Erro Scraper:", err)
 		http.Error(w, "Erro ao acessar o site: "+err.Error(), 500)
 		return
@@ -188,6 +184,7 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 	codigoGerado := gerarCodigoRelatorio()
 	var relatorioId int
 
+	// Salva no Banco
 	err = db.QueryRow(`INSERT INTO relatorios (user_id, url_alvo, codigo) VALUES ($1, $2, $3) RETURNING id`,
 		requestData.UserId, requestData.Url, codigoGerado).Scan(&relatorioId)
 
@@ -202,12 +199,13 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resposta JSON
 	w.Header().Set("Content-Type", "application/json")
 	response := RelatorioFinal{
 		Id:      relatorioId,
 		Codigo:  codigoGerado,
 		UrlAlvo: requestData.Url,
-		Data:    time.Now().Format("02/01/2006 15:04:05"),
+		Data:    time.Now().In(time.Local).Format("02/01/2006 15:04:05"), // Hora local
 		Itens:   itensResultado,
 	}
 	json.NewEncoder(w).Encode(response)
@@ -219,31 +217,27 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 
 	userId := r.URL.Query().Get("user_id")
 
-	// 1. Verifica no banco se esse usuário é ADMIN
+	// Verifica se é ADMIN
 	var isAdmin bool
-	err := db.QueryRow("SELECT is_admin FROM usuarios WHERE id = $1", userId).Scan(&isAdmin)
-	if err != nil {
-		http.Error(w, "Erro ao verificar permissão", 500)
-		return
-	}
+	db.QueryRow("SELECT is_admin FROM usuarios WHERE id = $1", userId).Scan(&isAdmin)
 
 	var query string
 	var rows *sql.Rows
+	var err error
 
 	if isAdmin {
-		// CENÁRIO 1: É CHEFE -> Mostra TUDO de TODOS (Sem WHERE user_id)
-		fmt.Println("Auditor Chefe acessando histórico completo...")
+		// Admin vê tudo
 		query = `
-			SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS') as data_fmt, u.username
+			SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username
 			FROM relatorios r
 			JOIN usuarios u ON r.user_id = u.id
 			ORDER BY r.data_auditoria DESC
 		`
 		rows, err = db.Query(query)
 	} else {
-		// CENÁRIO 2: É COMUM -> Mostra só os dele
+		// Usuário comum vê só os seus
 		query = `
-			SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS') as data_fmt, u.username
+			SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username
 			FROM relatorios r
 			JOIN usuarios u ON r.user_id = u.id
 			WHERE r.user_id = $1
@@ -258,7 +252,6 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// ... (o resto da função scan e json continua idêntico) ...
 	var lista []map[string]interface{}
 	for rows.Next() {
 		var id int
@@ -270,13 +263,14 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 			"id": id, "codigo": codigo, "url": url, "data": data, "usuario": usuario,
 		})
 	}
+
 	if lista == nil {
 		lista = []map[string]interface{}{}
 	}
 	json.NewEncoder(w).Encode(lista)
 }
 
-// ROTA 3: DETALHES DE UM RELATÓRIO ESPECÍFICO (GET)
+// ROTA 3: DETALHES DE UM RELATÓRIO (GET)
 func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -288,7 +282,7 @@ func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 
 	var relatorio RelatorioFinal
 
-	// Busca Cabeçalho (incluindo o código)
+	// Busca Cabeçalho
 	queryHeader := `
 		SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS')
 		FROM relatorios r
@@ -323,28 +317,25 @@ func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // ==========================================
-// === FUNÇÕES AUXILIARES (ROBÔ E BANCO) ===
+// ===     FUNÇÕES AUXILIARES             ===
 // ==========================================
 
-// Função que gera: 2025 + Duas Letras + 4 Números (Ex: 2025AB1092)
+// Gera código: 2025AB1092
 func gerarCodigoRelatorio() string {
 	ano := time.Now().Year()
 	letras := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
 	l1 := string(letras[rand.Intn(len(letras))])
 	l2 := string(letras[rand.Intn(len(letras))])
-
-	numeros := rand.Intn(10000) // 0 a 9999
-
+	numeros := rand.Intn(10000)
 	return fmt.Sprintf("%d%s%s%04d", ano, l1, l2, numeros)
 }
 
-// Lógica do Robô Auditor (GoQuery)
+// Robô Scraper (Blindado + Checklist Dinâmico)
 func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
-	// === PASSO 1: Busca o Checklist no Banco de Dados ===
+	// 1. Busca Checklist do Banco
 	rows, err := db.Query("SELECT termo FROM checklist")
 	if err != nil {
-		return nil, fmt.Errorf("erro ao ler checklist: %v", err)
+		return nil, fmt.Errorf("erro checklist: %v", err)
 	}
 	defer rows.Close()
 
@@ -354,9 +345,8 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 		rows.Scan(&t)
 		listaItens = append(listaItens, t)
 	}
-	// ====================================================
 
-	// Configuração do Cliente HTTP (Robô Blindado)
+	// 2. Configura Cliente HTTP (Ignora SSL e define User-Agent)
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
 
@@ -373,9 +363,10 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("site retornou status %d", res.StatusCode)
+		return nil, fmt.Errorf("status code %d", res.StatusCode)
 	}
 
+	// 3. Parser HTML
 	baseUrl, err := url.Parse(urlAlvo)
 	if err != nil {
 		return nil, err
@@ -388,7 +379,7 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 
 	var resultados []ResultadoItem
 
-	// === PASSO 2: Usa a lista que veio do BANCO (listaItens) ===
+	// 4. Varredura
 	for _, termo := range listaItens {
 		status := "AUSENTE"
 		linkEncontrado := ""
@@ -403,10 +394,10 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 			textoLink = strings.TrimSpace(textoLink)
 			href = strings.TrimSpace(href)
 
-			// Verifica se contém o termo
 			if strings.Contains(textoLink, termo) || strings.Contains(strings.ToLower(href), termo) {
 				status = "ENCONTRADO"
 
+				// Resolve URL Relativa (ex: /contratos -> https://site.com/contratos)
 				hrefUrl, err := url.Parse(href)
 				if err == nil {
 					linkEncontrado = baseUrl.ResolveReference(hrefUrl).String()
@@ -428,16 +419,15 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 	return resultados, nil
 }
 
-// Criação e Reset das Tabelas
-// Criação e Reset das Tabelas
+// Criação e Reset das Tabelas (Com Admin Dinâmico)
 func criarTabelas() {
-	// Apaga tudo para garantir o reset
+	// Apaga tabelas antigas para garantir estrutura
 	db.Exec(`DROP TABLE IF EXISTS itens_relatorio`)
 	db.Exec(`DROP TABLE IF EXISTS relatorios`)
 	db.Exec(`DROP TABLE IF EXISTS checklist`)
 	db.Exec(`DROP TABLE IF EXISTS usuarios`)
 
-	// Recria Usuários
+	// 1. Usuários
 	db.Exec(`CREATE TABLE IF NOT EXISTS usuarios (
 		id SERIAL PRIMARY KEY,
 		username TEXT UNIQUE NOT NULL,
@@ -445,21 +435,18 @@ func criarTabelas() {
 		is_admin BOOLEAN DEFAULT FALSE
 	);`)
 
-	// === CORREÇÃO AQUI ===
-	// Geramos o hash da senha "123" agora mesmo, dinamicamente
+	// Cria o Admin "Auditor Chefe" com senha "123"
 	senhaAdmin := "123"
 	hashCalculado, _ := bcrypt.GenerateFromPassword([]byte(senhaAdmin), 10)
 
-	// Inserimos o Auditor Chefe com a senha que acabamos de gerar
 	_, err := db.Exec(`INSERT INTO usuarios (id, username, password_hash, is_admin) 
              VALUES (1, 'Auditor Chefe', $1, TRUE) 
              ON CONFLICT (id) DO NOTHING`, string(hashCalculado))
-
 	if err != nil {
-		fmt.Println("Erro ao criar Admin:", err)
+		fmt.Println("Erro criar admin:", err)
 	}
 
-	// Recria Relatórios
+	// 2. Relatórios
 	db.Exec(`CREATE TABLE IF NOT EXISTS relatorios (
 		id SERIAL PRIMARY KEY,
 		codigo TEXT UNIQUE NOT NULL,
@@ -468,7 +455,7 @@ func criarTabelas() {
 		data_auditoria TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`)
 
-	// Recria Itens
+	// 3. Itens do Relatório
 	db.Exec(`CREATE TABLE IF NOT EXISTS itens_relatorio (
 		id SERIAL PRIMARY KEY,
 		relatorio_id INT REFERENCES relatorios(id) ON DELETE CASCADE,
@@ -477,22 +464,21 @@ func criarTabelas() {
 		status TEXT NOT NULL
 	);`)
 
-	// 4. === NOVA TABELA DE CHECKLIST ===
+	// 4. Checklist Dinâmico
 	db.Exec(`CREATE TABLE IF NOT EXISTS checklist (
 		id SERIAL PRIMARY KEY,
 		termo TEXT UNIQUE NOT NULL
 	);`)
 
-	// Insere os itens padrão no banco
+	// Popula Checklist Padrão
 	itensPadrao := []string{
 		"licitações", "contratos", "despesas", "receitas",
 		"folha de pagamento", "diárias", "sic", "ouvidoria",
-		"rreo", "rgf", "obras", // Adicionei uns novos de exemplo
+		"rreo", "rgf", "obras",
 	}
-
 	for _, item := range itensPadrao {
 		db.Exec(`INSERT INTO checklist (termo) VALUES ($1) ON CONFLICT DO NOTHING`, item)
 	}
 
-	fmt.Println(">>> Banco atualizado! Checklist carregado no banco.")
+	fmt.Println(">>> Banco atualizado com sucesso!")
 }
