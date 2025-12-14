@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/lib/pq v1.10.9
-	golang.org/x/crypto v0.46.0
+	golang.org/x/crypto v0.44.0
 )
 
 require (

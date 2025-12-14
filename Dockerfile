@@ -1,28 +1,36 @@
-# Estágio 1: Construção
+# Estágio 1: Construção (Builder)
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
+# Copia os arquivos de dependência
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Copia todo o código fonte (pastas cmd, internal, etc)
 COPY . .
 
-RUN go build -o main .
+# === MUDANÇA CRÍTICA AQUI ===
+# Antes era: go build -o main .
+# Agora apontamos para a pasta onde está o main:
+RUN go build -o main ./cmd/app
+# ============================
 
-# Estágio 2: Execução
+# Estágio 2: Execução (Runner)
 FROM alpine:latest
 
 WORKDIR /root/
 
-# === MUDANÇA AQUI: Instalamos o tzdata ===
-RUN apk add --no-cache tzdata
-# =========================================
+# Instala fuso horário e certificados de segurança (Importante para o Robô)
+RUN apk add --no-cache tzdata ca-certificates
 
+# Copia o binário construído
 COPY --from=builder /app/main .
+# Copia a pasta estática (HTML/CSS)
 COPY --from=builder /app/static ./static
 
-# Define a variável de ambiente para o Linux já acordar no Brasil
+# Configurações de Ambiente
 ENV TZ=America/Sao_Paulo
 
+# Comando para rodar
 CMD ["./main"]
