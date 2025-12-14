@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync" // <--- IMPORTANTE: Para rodar testes paralelos
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -55,7 +56,7 @@ func main() {
 		loc = time.Local
 		fmt.Println("Aviso: Fuso horário SP não carregado, usando local do sistema.")
 	}
-	time.Local = loc // Define globalmente para o Go
+	time.Local = loc
 
 	// 2. Conexão com Banco de Dados (Nuvem ou Local)
 	connStr := os.Getenv("DATABASE_URL")
@@ -68,7 +69,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Tenta conectar (Retry logic para nuvem)
+	// Retry logic
 	for i := 0; i < 5; i++ {
 		if err = db.Ping(); err == nil {
 			break
@@ -76,13 +77,13 @@ func main() {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Força o Banco a trabalhar no horário de Brasília
+	// Força Timezone no Banco
 	db.Exec("SET TIME ZONE 'America/Sao_Paulo'")
 
-	// 3. Inicializa Tabelas e Dados Padrão
+	// 3. Inicializa Tabelas
 	criarTabelas()
 
-	// 4. Configura Servidor de Arquivos (Frontend)
+	// 4. Configura Servidor (Frontend)
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
@@ -92,15 +93,14 @@ func main() {
 	http.HandleFunc("/api/relatorio", relatorioDetalhesHandler)
 	http.HandleFunc("/api/registrar", registrarHandler)
 	http.HandleFunc("/api/login", loginHandler)
-	// Rota de excluir removida conforme solicitado
 
-	// 6. Define Porta (Render usa a env PORT)
+	// 6. Porta
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	fmt.Println("🔥 Sistema Auditor SIA rodando na porta:", port)
+	fmt.Println("🔥 Sistema Auditor SIA (Smart Search) rodando na porta:", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
@@ -164,16 +164,16 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&requestData)
 
-	// Limpeza e correção da URL
+	// Limpeza da URL
 	inputUrl := strings.TrimSpace(requestData.Url)
 	if !strings.HasPrefix(inputUrl, "http://") && !strings.HasPrefix(inputUrl, "https://") {
 		inputUrl = "https://" + inputUrl
 	}
 	requestData.Url = inputUrl
 
-	fmt.Println("Iniciando auditoria em:", requestData.Url)
+	fmt.Println("🔎 Iniciando investigação profunda em:", requestData.Url)
 
-	// Executa o Robô
+	// Executa o Robô (Agora versão INTELIGENTE)
 	itensResultado, err := realizarAuditoria(requestData.Url)
 	if err != nil {
 		fmt.Println("Erro Scraper:", err)
@@ -205,7 +205,7 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 		Id:      relatorioId,
 		Codigo:  codigoGerado,
 		UrlAlvo: requestData.Url,
-		Data:    time.Now().In(time.Local).Format("02/01/2006 15:04:05"), // Hora local
+		Data:    time.Now().In(time.Local).Format("02/01/2006 15:04:05"),
 		Itens:   itensResultado,
 	}
 	json.NewEncoder(w).Encode(response)
@@ -214,10 +214,8 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 // ROTA 2: LISTAR HISTÓRICO (GET)
 func historicoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	userId := r.URL.Query().Get("user_id")
 
-	// Verifica se é ADMIN
 	var isAdmin bool
 	db.QueryRow("SELECT is_admin FROM usuarios WHERE id = $1", userId).Scan(&isAdmin)
 
@@ -226,23 +224,10 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if isAdmin {
-		// Admin vê tudo
-		query = `
-			SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username
-			FROM relatorios r
-			JOIN usuarios u ON r.user_id = u.id
-			ORDER BY r.data_auditoria DESC
-		`
+		query = `SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username FROM relatorios r JOIN usuarios u ON r.user_id = u.id ORDER BY r.data_auditoria DESC`
 		rows, err = db.Query(query)
 	} else {
-		// Usuário comum vê só os seus
-		query = `
-			SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username
-			FROM relatorios r
-			JOIN usuarios u ON r.user_id = u.id
-			WHERE r.user_id = $1
-			ORDER BY r.data_auditoria DESC
-		`
+		query = `SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username FROM relatorios r JOIN usuarios u ON r.user_id = u.id WHERE r.user_id = $1 ORDER BY r.data_auditoria DESC`
 		rows, err = db.Query(query, userId)
 	}
 
@@ -259,9 +244,7 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&id, &codigo, &url, &data, &usuario); err != nil {
 			continue
 		}
-		lista = append(lista, map[string]interface{}{
-			"id": id, "codigo": codigo, "url": url, "data": data, "usuario": usuario,
-		})
+		lista = append(lista, map[string]interface{}{"id": id, "codigo": codigo, "url": url, "data": data, "usuario": usuario})
 	}
 
 	if lista == nil {
@@ -273,7 +256,6 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 // ROTA 3: DETALHES DE UM RELATÓRIO (GET)
 func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
 		http.Error(w, "ID obrigatório", 400)
@@ -281,25 +263,14 @@ func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var relatorio RelatorioFinal
-
-	// Busca Cabeçalho
-	queryHeader := `
-		SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS')
-		FROM relatorios r
-		WHERE r.id = $1
-	`
+	queryHeader := `SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS') FROM relatorios r WHERE r.id = $1`
 	err := db.QueryRow(queryHeader, idStr).Scan(&relatorio.Id, &relatorio.Codigo, &relatorio.UrlAlvo, &relatorio.Data)
 	if err != nil {
 		http.Error(w, "Relatório não encontrado", 404)
 		return
 	}
 
-	// Busca Itens
-	queryItens := `
-		SELECT item_procurado, status, coalesce(url_encontrada, '')
-		FROM itens_relatorio
-		WHERE relatorio_id = $1
-	`
+	queryItens := `SELECT item_procurado, status, coalesce(url_encontrada, '') FROM itens_relatorio WHERE relatorio_id = $1`
 	rows, err := db.Query(queryItens, idStr)
 	if err != nil {
 		http.Error(w, "Erro ao buscar itens", 500)
@@ -312,26 +283,16 @@ func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 		rows.Scan(&item.ItemProcurado, &item.Status, &item.UrlEncontrada)
 		relatorio.Itens = append(relatorio.Itens, item)
 	}
-
 	json.NewEncoder(w).Encode(relatorio)
 }
 
 // ==========================================
-// ===     FUNÇÕES AUXILIARES             ===
+// ===     INTELIGÊNCIA DO ROBÔ           ===
 // ==========================================
 
-// Gera código: 2025AB1092
-func gerarCodigoRelatorio() string {
-	ano := time.Now().Year()
-	letras := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	l1 := string(letras[rand.Intn(len(letras))])
-	l2 := string(letras[rand.Intn(len(letras))])
-	numeros := rand.Intn(10000)
-	return fmt.Sprintf("%d%s%s%04d", ano, l1, l2, numeros)
-}
+// Esta função substitui a antiga e adiciona a BUSCA INTELIGENTE
+func realizarAuditoria(urlPrincipal string) ([]ResultadoItem, error) {
 
-// Robô Scraper (Blindado + Checklist Dinâmico)
-func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 	// 1. Busca Checklist do Banco
 	rows, err := db.Query("SELECT termo FROM checklist")
 	if err != nil {
@@ -339,16 +300,51 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 	}
 	defer rows.Close()
 
-	var listaItens []string
+	var termosProcurados []string
 	for rows.Next() {
 		var t string
 		rows.Scan(&t)
-		listaItens = append(listaItens, t)
+		termosProcurados = append(termosProcurados, t)
 	}
 
-	// 2. Configura Cliente HTTP (Ignora SSL e define User-Agent)
+	// 2. Fase de Reconhecimento: Descobrir Subdomínios Válidos (transparencia., portal., etc)
+	urlsParaEscanear := descobrirPortais(urlPrincipal)
+	fmt.Println(">> Portais Ativos Encontrados:", urlsParaEscanear)
+
+	// Mapa para guardar o melhor resultado de cada termo
+	mapaResultados := make(map[string]ResultadoItem)
+	// Inicializa tudo como AUSENTE
+	for _, termo := range termosProcurados {
+		mapaResultados[termo] = ResultadoItem{ItemProcurado: termo, Status: "AUSENTE", UrlEncontrada: ""}
+	}
+
+	// 3. Varredura em Massa (Escaneia a URL principal E os subdomínios encontrados)
+	for _, urlAlvo := range urlsParaEscanear {
+		fmt.Println("   ... Lendo:", urlAlvo)
+
+		doc, err := baixarHTML(urlAlvo)
+		if err != nil {
+			continue
+		} // Se falhar um, tenta o próximo
+
+		// Analisa o HTML desse portal específico
+		analisarDocumento(doc, urlAlvo, termosProcurados, mapaResultados)
+	}
+
+	// 4. Converte mapa para lista final
+	var listaFinal []ResultadoItem
+	for _, termo := range termosProcurados {
+		listaFinal = append(listaFinal, mapaResultados[termo])
+	}
+
+	return listaFinal, nil
+}
+
+// Função auxiliar para baixar e parsear HTML
+func baixarHTML(urlAlvo string) (*goquery.Document, error) {
+	// Configuração do Cliente HTTP (Ignora SSL e tem Timeout curto)
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
+	client := &http.Client{Transport: tr, Timeout: 20 * time.Second}
 
 	req, err := http.NewRequest("GET", urlAlvo, nil)
 	if err != nil {
@@ -363,26 +359,77 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("status code %d", res.StatusCode)
+		return nil, fmt.Errorf("status %d", res.StatusCode)
 	}
 
-	// 3. Parser HTML
-	baseUrl, err := url.Parse(urlAlvo)
+	return goquery.NewDocumentFromReader(res.Body)
+}
+
+// Tenta adivinhar subdomínios (Discovery)
+func descobrirPortais(urlEntrada string) []string {
+	u, err := url.Parse(urlEntrada)
 	if err != nil {
-		return nil, err
+		return []string{urlEntrada}
 	}
 
-	doc, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		return nil, err
+	host := u.Hostname()
+	scheme := u.Scheme
+	hostRaiz := strings.TrimPrefix(host, "www.")
+
+	// Lista de palpites para testar
+	candidatos := []string{
+		urlEntrada, // URL Original
+		fmt.Sprintf("%s://transparencia.%s", scheme, hostRaiz),
+		fmt.Sprintf("%s://portaldatransparencia.%s", scheme, hostRaiz),
+		fmt.Sprintf("%s://portal.%s", scheme, hostRaiz),
+		fmt.Sprintf("%s://esic.%s", scheme, hostRaiz),
+		strings.TrimSuffix(urlEntrada, "/") + "/transparencia",
+		strings.TrimSuffix(urlEntrada, "/") + "/portal",
 	}
 
-	var resultados []ResultadoItem
+	var urlsValidas []string
+	var mu sync.Mutex // Protege a lista no paralelo
+	var wg sync.WaitGroup
 
-	// 4. Varredura
-	for _, termo := range listaItens {
-		status := "AUSENTE"
-		linkEncontrado := ""
+	// Testa todos em paralelo
+	for _, candidato := range candidatos {
+		wg.Add(1)
+		go func(urlTeste string) {
+			defer wg.Done()
+
+			// Teste rápido
+			tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+			client := &http.Client{Transport: tr, Timeout: 8 * time.Second}
+
+			resp, err := client.Get(urlTeste)
+			if err == nil && resp.StatusCode == 200 {
+				mu.Lock()
+				urlsValidas = append(urlsValidas, urlTeste)
+				mu.Unlock()
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
+		}(candidato)
+	}
+
+	wg.Wait()
+
+	if len(urlsValidas) == 0 {
+		return []string{urlEntrada}
+	}
+	return urlsValidas
+}
+
+// Analisa um documento e atualiza o mapa de resultados
+func analisarDocumento(doc *goquery.Document, urlAtual string, termos []string, mapa map[string]ResultadoItem) {
+	baseUrl, _ := url.Parse(urlAtual)
+
+	for _, termo := range termos {
+		// Se já encontrou, pula
+		if mapa[termo].Status == "ENCONTRADO" {
+			continue
+		}
 
 		doc.Find("a").EachWithBreak(func(i int, s *goquery.Selection) bool {
 			textoLink := strings.ToLower(s.Text())
@@ -391,43 +438,45 @@ func realizarAuditoria(urlAlvo string) ([]ResultadoItem, error) {
 				return true
 			}
 
-			textoLink = strings.TrimSpace(textoLink)
-			href = strings.TrimSpace(href)
-
 			if strings.Contains(textoLink, termo) || strings.Contains(strings.ToLower(href), termo) {
-				status = "ENCONTRADO"
 
-				// Resolve URL Relativa (ex: /contratos -> https://site.com/contratos)
+				linkFinal := href
 				hrefUrl, err := url.Parse(href)
-				if err == nil {
-					linkEncontrado = baseUrl.ResolveReference(hrefUrl).String()
-				} else {
-					linkEncontrado = href
+				if err == nil && baseUrl != nil {
+					linkFinal = baseUrl.ResolveReference(hrefUrl).String()
+				}
+
+				mapa[termo] = ResultadoItem{
+					ItemProcurado: termo,
+					Status:        "ENCONTRADO",
+					UrlEncontrada: linkFinal,
 				}
 				return false
 			}
 			return true
 		})
-
-		resultados = append(resultados, ResultadoItem{
-			ItemProcurado: termo,
-			Status:        status,
-			UrlEncontrada: linkEncontrado,
-		})
 	}
-
-	return resultados, nil
 }
 
-// Criação e Reset das Tabelas (Com Admin Dinâmico)
+// ==========================================
+// ===     FUNÇÕES AUXILIARES GERAIS      ===
+// ==========================================
+
+func gerarCodigoRelatorio() string {
+	ano := time.Now().Year()
+	letras := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	l1 := string(letras[rand.Intn(len(letras))])
+	l2 := string(letras[rand.Intn(len(letras))])
+	numeros := rand.Intn(10000)
+	return fmt.Sprintf("%d%s%s%04d", ano, l1, l2, numeros)
+}
+
 func criarTabelas() {
-	// Apaga tabelas antigas para garantir estrutura
 	db.Exec(`DROP TABLE IF EXISTS itens_relatorio`)
 	db.Exec(`DROP TABLE IF EXISTS relatorios`)
 	db.Exec(`DROP TABLE IF EXISTS checklist`)
 	db.Exec(`DROP TABLE IF EXISTS usuarios`)
 
-	// 1. Usuários
 	db.Exec(`CREATE TABLE IF NOT EXISTS usuarios (
 		id SERIAL PRIMARY KEY,
 		username TEXT UNIQUE NOT NULL,
@@ -435,18 +484,12 @@ func criarTabelas() {
 		is_admin BOOLEAN DEFAULT FALSE
 	);`)
 
-	// Cria o Admin "Auditor Chefe" com senha "123"
 	senhaAdmin := "123"
 	hashCalculado, _ := bcrypt.GenerateFromPassword([]byte(senhaAdmin), 10)
-
-	_, err := db.Exec(`INSERT INTO usuarios (id, username, password_hash, is_admin) 
+	db.Exec(`INSERT INTO usuarios (id, username, password_hash, is_admin) 
              VALUES (1, 'Auditor Chefe', $1, TRUE) 
              ON CONFLICT (id) DO NOTHING`, string(hashCalculado))
-	if err != nil {
-		fmt.Println("Erro criar admin:", err)
-	}
 
-	// 2. Relatórios
 	db.Exec(`CREATE TABLE IF NOT EXISTS relatorios (
 		id SERIAL PRIMARY KEY,
 		codigo TEXT UNIQUE NOT NULL,
@@ -455,7 +498,6 @@ func criarTabelas() {
 		data_auditoria TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`)
 
-	// 3. Itens do Relatório
 	db.Exec(`CREATE TABLE IF NOT EXISTS itens_relatorio (
 		id SERIAL PRIMARY KEY,
 		relatorio_id INT REFERENCES relatorios(id) ON DELETE CASCADE,
@@ -464,13 +506,11 @@ func criarTabelas() {
 		status TEXT NOT NULL
 	);`)
 
-	// 4. Checklist Dinâmico
 	db.Exec(`CREATE TABLE IF NOT EXISTS checklist (
 		id SERIAL PRIMARY KEY,
 		termo TEXT UNIQUE NOT NULL
 	);`)
 
-	// Popula Checklist Padrão
 	itensPadrao := []string{
 		"licitações", "contratos", "despesas", "receitas",
 		"folha de pagamento", "diárias", "sic", "ouvidoria",
