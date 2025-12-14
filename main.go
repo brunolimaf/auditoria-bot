@@ -500,6 +500,21 @@ func criarTabelas() {
 		"rreo",
 		"rgf",
 		"obra", // obra, obras
+		"licitacao, licitacoes, dispensa, inexigibilidade",
+		"licit",
+		"lic",
+		"convenio",
+		"lei",
+		"relatorio",
+		"execucao orcamentaria",
+		"lei orcamentaria",
+		"plano plurianual",
+		"lei de diretrizes",
+		"mpo",
+		"receita extraorcamentaria",
+		"obras publicas",
+		"despesa extraorcamentaria",
+		"estrutura organizacional",
 	}
 	for _, item := range itensPadrao {
 		db.Exec(`INSERT INTO checklist (termo) VALUES ($1) ON CONFLICT DO NOTHING`, item)
