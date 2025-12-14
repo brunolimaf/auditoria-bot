@@ -489,31 +489,19 @@ func criarTabelas() {
 	// === CORREÇÃO CRÍTICA NO CHECKLIST ===
 	// Usamos o singular e radicais das palavras para pegar variações (receita.php, receitas, despesas, despesa...)
 	itensPadrao := []string{
-		"licita",    // pega licitação, licitações, licitacoes
-		"contrato",  // pega contrato, contratos
-		"despesa",   // pega despesa, despesas, despesa.php
-		"receita",   // pega receita, receitas, receita.php
-		"folha",     // pega folha de pagamento
-		"diaria",    // pega diaria, diarias
-		"sic",       // esic, sic
-		"ouvidoria", // ouvidoria
+		"licitacao, dispensa", // pega licitação, licitações, licitacoes
+		"contrato",            // pega contrato, contratos
+		"despesa",             // pega despesa, despesas, despesa.php
+		"receita",             // pega receita, receitas, receita.php
+		"folha",               // pega folha de pagamento
+		"diaria",              // pega diaria, diarias
+		"sic",                 // esic, sic
+		"ouvidoria",           // ouvidoria
 		"rreo",
 		"rgf",
-		"obra", // obra, obras
-		"licitacao, licitacoes, dispensa, inexigibilidade",
-		"licit",
-		"lic",
+		"obra",
 		"convenio",
-		"lei",
-		"relatorio",
-		"execucao orcamentaria",
-		"lei orcamentaria",
-		"plano plurianual",
-		"lei de diretrizes",
-		"mpo",
-		"receita extraorcamentaria",
-		"obras publicas",
-		"despesa extraorcamentaria",
+		"lei municipal",
 		"estrutura organizacional",
 	}
 	for _, item := range itensPadrao {
