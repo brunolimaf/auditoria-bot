@@ -47,10 +47,8 @@ type RelatorioFinal struct {
 // ==========================================
 
 func main() {
-	// 0. Configurações Iniciais
 	rand.Seed(time.Now().UnixNano())
 
-	// 1. Fuso Horário (Brasília)
 	loc, err := time.LoadLocation("America/Sao_Paulo")
 	if err != nil {
 		loc = time.Local
@@ -58,7 +56,6 @@ func main() {
 	}
 	time.Local = loc
 
-	// 2. Conexão Banco de Dados
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
 		connStr = "postgres://auditor:senha_segura@127.0.0.1:5432/auditoria_db?sslmode=disable"
@@ -69,7 +66,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Retry logic para conexão
 	for i := 0; i < 5; i++ {
 		if err = db.Ping(); err == nil {
 			break
@@ -77,30 +73,24 @@ func main() {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Força timezone no banco
 	db.Exec("SET TIME ZONE 'America/Sao_Paulo'")
-
-	// 3. Inicializa Tabelas
 	criarTabelas()
 
-	// 4. Servidor de Arquivos (Frontend)
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
-	// 5. Rotas da API
 	http.HandleFunc("/api/auditar", auditarHandler)
 	http.HandleFunc("/api/historico", historicoHandler)
 	http.HandleFunc("/api/relatorio", relatorioDetalhesHandler)
 	http.HandleFunc("/api/registrar", registrarHandler)
 	http.HandleFunc("/api/login", loginHandler)
 
-	// 6. Start
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	fmt.Println("🔥 Sistema Auditor SIA (Deep Vision + Drill Down) rodando na porta:", port)
+	fmt.Println("🔥 Sistema Auditor SIA (V. Final) rodando na porta:", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
@@ -161,7 +151,6 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("🔎 Iniciando Auditoria Profunda em:", reqData.Url)
 
-	// === EXECUTA O ROBÔ INTELIGENTE ===
 	itensResultado, err := realizarAuditoriaProfunda(reqData.Url)
 	if err != nil {
 		fmt.Println("Erro Scraper:", err)
@@ -169,7 +158,6 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gera código e salva
 	codigo := gerarCodigoRelatorio()
 	var rId int
 	err = db.QueryRow(`INSERT INTO relatorios (user_id, url_alvo, codigo) VALUES ($1, $2, $3) RETURNING id`,
@@ -200,7 +188,6 @@ func auditarHandler(w http.ResponseWriter, r *http.Request) {
 // ==========================================
 
 func realizarAuditoriaProfunda(urlPrincipal string) ([]ResultadoItem, error) {
-	// 1. Carrega Checklist
 	rows, err := db.Query("SELECT termo FROM checklist")
 	if err != nil {
 		return nil, err
@@ -214,60 +201,48 @@ func realizarAuditoriaProfunda(urlPrincipal string) ([]ResultadoItem, error) {
 		termos = append(termos, t)
 	}
 
-	// 2. Mapa de Resultados
 	mapaResultados := make(map[string]ResultadoItem)
-	// Inicializa tudo como AUSENTE
 	for _, t := range termos {
 		mapaResultados[t] = ResultadoItem{ItemProcurado: t, Status: "AUSENTE", UrlEncontrada: ""}
 	}
 
-	// 3. Fase de Reconhecimento (Discovery)
-	// Tenta achar subdomínios óbvios (transparencia., portal., etc)
+	// Discovery (Adiciona Ouvidoria na busca ativa)
 	urlsParaEscanear := descobrirPortais(urlPrincipal)
-	fmt.Println(">> Alvos iniciais detectados:", urlsParaEscanear)
-
-	// 4. Varredura com Drill Down (Fila de Processamento)
-	// Se acharmos um link "Portal da Transparência" dentro do site, adicionamos na fila.
+	fmt.Println(">> Alvos iniciais:", urlsParaEscanear)
 
 	fila := urlsParaEscanear
 	visitadas := make(map[string]bool)
-	var mu sync.Mutex // Protege o mapa de resultados
+	var mu sync.Mutex
 
-	// Limite de segurança para não escanear a internet inteira
-	limitePaginas := 15
+	limitePaginas := 20 // Aumentei um pouco para garantir profundidade
 	contador := 0
 
 	for len(fila) > 0 && contador < limitePaginas {
 		urlAlvo := fila[0]
-		fila = fila[1:] // Remove da fila
+		fila = fila[1:]
 
-		// Verifica se já visitou
 		if visitadas[urlAlvo] {
 			continue
 		}
 		visitadas[urlAlvo] = true
 		contador++
 
-		fmt.Println("   ... Lendo (Deep Vision):", urlAlvo)
+		fmt.Println("   ... Lendo:", urlAlvo)
 
 		doc, err := baixarHTML(urlAlvo)
 		if err != nil {
 			continue
 		}
 
-		// Analisa a página atual
 		novasUrls := analisarDocumento(doc, urlAlvo, termos, mapaResultados, &mu)
 
-		// Adiciona as novas URLs descobertas na fila (se não foram visitadas)
 		for _, nova := range novasUrls {
 			if !visitadas[nova] {
 				fila = append(fila, nova)
-				fmt.Println("      + Drill Down: Entrando em link interno >", nova)
 			}
 		}
 	}
 
-	// Converte mapa para lista final
 	var listaFinal []ResultadoItem
 	for _, t := range termos {
 		listaFinal = append(listaFinal, mapaResultados[t])
@@ -275,28 +250,19 @@ func realizarAuditoriaProfunda(urlPrincipal string) ([]ResultadoItem, error) {
 	return listaFinal, nil
 }
 
-// Analisa HTML usando Deep Vision (Lê imagens) e Drill Down (Acha links de sistemas)
 func analisarDocumento(doc *goquery.Document, urlAtual string, termos []string, mapa map[string]ResultadoItem, mu *sync.Mutex) []string {
 	baseUrl, _ := url.Parse(urlAtual)
 	var linksInteressantes []string
 
-	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		href, exists := s.Attr("href")
-		if !exists {
-			return
-		}
-
-		// === DEEP VISION: Extrai texto do link + Alt de Imagens + Titles ===
-		textoCompleto := extrairTextoRico(s)
-
-		// Corrige link relativo
-		linkFinal := href
-		hrefUrl, err := url.Parse(href)
+	// Função interna para processar qualquer URL encontrada (seja link ou iframe)
+	processarLink := func(linkRaw string, textoContexto string) {
+		linkFinal := linkRaw
+		hrefUrl, err := url.Parse(linkRaw)
 		if err == nil && baseUrl != nil {
 			linkFinal = baseUrl.ResolveReference(hrefUrl).String()
 		}
 
-		// 1. Verifica Checklist (Contratos, Despesas, etc)
+		// Verifica Checklist
 		for _, termo := range termos {
 			mu.Lock()
 			jaAchou := mapa[termo].Status == "ENCONTRADO"
@@ -306,8 +272,9 @@ func analisarDocumento(doc *goquery.Document, urlAtual string, termos []string, 
 				continue
 			}
 
-			// Procura no texto do botão OU na URL de destino (ex: fatorsistemas.../despesa)
-			if strings.Contains(textoCompleto, termo) || strings.Contains(strings.ToLower(linkFinal), termo) {
+			// CORREÇÃO CRUCIAL:
+			// Verifica se o termo está no texto (contexto) OU na URL (ex: receita.php)
+			if strings.Contains(textoContexto, termo) || strings.Contains(strings.ToLower(linkFinal), termo) {
 				mu.Lock()
 				mapa[termo] = ResultadoItem{
 					ItemProcurado: termo,
@@ -318,70 +285,82 @@ func analisarDocumento(doc *goquery.Document, urlAtual string, termos []string, 
 			}
 		}
 
-		// 2. Drill Down: Procura links que levam para portais externos
-		// Se o botão diz "Portal da Transparência" ou "Acesso à Informação", queremos entrar nele!
-		gatilhosNavegacao := []string{"transparência", "transparencia", "portal", "acesso a informação", "acesso à informação"}
+		// Drill Down: Busca novos portais
+		gatilhos := []string{"transparência", "transparencia", "portal", "acesso a informação", "ouvidoria"}
 		ehArquivo := strings.HasSuffix(linkFinal, ".pdf") || strings.HasSuffix(linkFinal, ".zip") || strings.HasSuffix(linkFinal, ".rar")
 
 		if !ehArquivo {
-			for _, gatilho := range gatilhosNavegacao {
-				if strings.Contains(textoCompleto, gatilho) {
+			for _, gatilho := range gatilhos {
+				if strings.Contains(textoContexto, gatilho) {
 					linksInteressantes = append(linksInteressantes, linkFinal)
 					break
 				}
 			}
 		}
+	}
+
+	// 1. Processa Links <a>
+	doc.Find("a").Each(func(i int, s *goquery.Selection) {
+		href, exists := s.Attr("href")
+		if !exists {
+			return
+		}
+		texto := extrairTextoRico(s)
+		processarLink(href, texto)
+	})
+
+	// 2. Processa IFrames (MUITO IMPORTANTE para Fator Sistemas e Ágape)
+	doc.Find("iframe").Each(func(i int, s *goquery.Selection) {
+		src, exists := s.Attr("src")
+		if !exists {
+			return
+		}
+		// Trata o Iframe como um link que tem o texto "transparencia" embutido, para forçar a visita
+		processarLink(src, "iframe transparencia sistema externo")
+
+		// Adiciona diretamente à fila de investigação
+		linksInteressantes = append(linksInteressantes, src)
 	})
 
 	return linksInteressantes
 }
 
-// Extrai tudo que é texto de dentro de um <a> (incluindo imagens)
 func extrairTextoRico(s *goquery.Selection) string {
 	texto := s.Text()
 	title, _ := s.Attr("title")
-
-	// Busca imagem dentro do <a>
 	img := s.Find("img")
 	alt := img.AttrOr("alt", "")
 	imgTitle := img.AttrOr("title", "")
-
-	// Junta tudo em minúsculo
 	conteudo := fmt.Sprintf("%s %s %s %s", texto, title, alt, imgTitle)
 	return strings.ToLower(strings.TrimSpace(conteudo))
 }
 
-// Baixa HTML com cliente seguro
 func baixarHTML(urlAlvo string) (*goquery.Document, error) {
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
-
 	req, _ := http.NewRequest("GET", urlAlvo, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36")
-
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
-
 	if res.StatusCode != 200 {
 		return nil, fmt.Errorf("status %d", res.StatusCode)
 	}
 	return goquery.NewDocumentFromReader(res.Body)
 }
 
-// Descobre subdomínios comuns
 func descobrirPortais(urlEntrada string) []string {
 	u, err := url.Parse(urlEntrada)
 	if err != nil {
 		return []string{urlEntrada}
 	}
-
 	host := u.Hostname()
 	scheme := u.Scheme
 	hostRaiz := strings.TrimPrefix(host, "www.")
 
+	// Adicionamos OUVIDORIA aqui para forçar a descoberta
 	candidatos := []string{
 		urlEntrada,
 		fmt.Sprintf("%s://transparencia.%s", scheme, hostRaiz),
@@ -389,6 +368,7 @@ func descobrirPortais(urlEntrada string) []string {
 		fmt.Sprintf("%s://portal.%s", scheme, hostRaiz),
 		strings.TrimSuffix(urlEntrada, "/") + "/transparencia",
 		strings.TrimSuffix(urlEntrada, "/") + "/portal",
+		strings.TrimSuffix(urlEntrada, "/") + "/ouvidoria", // <--- NOVO
 	}
 
 	var urlsValidas []string
@@ -401,7 +381,6 @@ func descobrirPortais(urlEntrada string) []string {
 			defer wg.Done()
 			tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 			client := &http.Client{Transport: tr, Timeout: 5 * time.Second}
-
 			resp, err := client.Get(teste)
 			if err == nil && resp.StatusCode == 200 {
 				mu.Lock()
@@ -413,7 +392,6 @@ func descobrirPortais(urlEntrada string) []string {
 			}
 		}(c)
 	}
-
 	wg.Wait()
 	if len(urlsValidas) == 0 {
 		return []string{urlEntrada}
@@ -421,9 +399,8 @@ func descobrirPortais(urlEntrada string) []string {
 	return urlsValidas
 }
 
-// ==========================================
-// ===     FUNÇÕES AUXILIARES GERAIS      ===
-// ==========================================
+// ... (gerarCodigoRelatorio, historicoHandler, relatorioDetalhesHandler)
+// Mantenha as funções abaixo iguais.
 
 func gerarCodigoRelatorio() string {
 	ano := time.Now().Year()
@@ -439,11 +416,9 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 	userId := r.URL.Query().Get("user_id")
 	var isAdmin bool
 	db.QueryRow("SELECT is_admin FROM usuarios WHERE id = $1", userId).Scan(&isAdmin)
-
 	var query string
 	var rows *sql.Rows
 	var err error
-
 	if isAdmin {
 		query = `SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username FROM relatorios r JOIN usuarios u ON r.user_id = u.id ORDER BY r.data_auditoria DESC`
 		rows, err = db.Query(query)
@@ -451,13 +426,11 @@ func historicoHandler(w http.ResponseWriter, r *http.Request) {
 		query = `SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS'), u.username FROM relatorios r JOIN usuarios u ON r.user_id = u.id WHERE r.user_id = $1 ORDER BY r.data_auditoria DESC`
 		rows, err = db.Query(query, userId)
 	}
-
 	if err != nil {
 		http.Error(w, "Erro histórico", 500)
 		return
 	}
 	defer rows.Close()
-
 	var lista []map[string]interface{}
 	for rows.Next() {
 		var id int
@@ -477,14 +450,12 @@ func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	idStr := r.URL.Query().Get("id")
 	var relatorio RelatorioFinal
-
 	queryHeader := `SELECT r.id, r.codigo, r.url_alvo, to_char(r.data_auditoria, 'DD/MM/YYYY HH24:MI:SS') FROM relatorios r WHERE r.id = $1`
 	err := db.QueryRow(queryHeader, idStr).Scan(&relatorio.Id, &relatorio.Codigo, &relatorio.UrlAlvo, &relatorio.Data)
 	if err != nil {
 		http.Error(w, "Não encontrado", 404)
 		return
 	}
-
 	queryItens := `SELECT item_procurado, status, coalesce(url_encontrada, '') FROM itens_relatorio WHERE relatorio_id = $1`
 	rows, err := db.Query(queryItens, idStr)
 	if err != nil {
@@ -492,7 +463,6 @@ func relatorioDetalhesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		var item ResultadoItem
 		rows.Scan(&item.ItemProcurado, &item.Status, &item.UrlEncontrada)
@@ -516,10 +486,20 @@ func criarTabelas() {
 	db.Exec(`CREATE TABLE IF NOT EXISTS itens_relatorio (id SERIAL PRIMARY KEY, relatorio_id INT REFERENCES relatorios(id) ON DELETE CASCADE, item_procurado TEXT NOT NULL, url_encontrada TEXT, status TEXT NOT NULL);`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS checklist (id SERIAL PRIMARY KEY, termo TEXT UNIQUE NOT NULL);`)
 
+	// === CORREÇÃO CRÍTICA NO CHECKLIST ===
+	// Usamos o singular e radicais das palavras para pegar variações (receita.php, receitas, despesas, despesa...)
 	itensPadrao := []string{
-		"licitações", "contratos", "despesas", "receitas",
-		"folha de pagamento", "diárias", "sic", "ouvidoria",
-		"rreo", "rgf", "obras",
+		"licita",    // pega licitação, licitações, licitacoes
+		"contrato",  // pega contrato, contratos
+		"despesa",   // pega despesa, despesas, despesa.php
+		"receita",   // pega receita, receitas, receita.php
+		"folha",     // pega folha de pagamento
+		"diaria",    // pega diaria, diarias
+		"sic",       // esic, sic
+		"ouvidoria", // ouvidoria
+		"rreo",
+		"rgf",
+		"obra", // obra, obras
 	}
 	for _, item := range itensPadrao {
 		db.Exec(`INSERT INTO checklist (termo) VALUES ($1) ON CONFLICT DO NOTHING`, item)
