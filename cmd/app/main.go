@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	_ "github.com/lib/pq"
 
@@ -18,7 +19,16 @@ import (
 
 func main() {
 	// 0. Configurações Iniciais
-	// (O Timezone já está sendo tratado no Service/Repo, mas podemos manter aqui por segurança)
+	// 0. Configurações de Fuso Horário (FIX: RECOLOCADO AQUI)
+	// Isso garante que time.Now() pegue o horário certo no código Go
+	loc, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		// Fallback se não tiver o tzdata instalado
+		loc = time.Local
+		fmt.Println("Aviso: Fuso horário SP não carregado, usando local do sistema.")
+	}
+	time.Local = loc // Define globalmente
+	// ========================================================
 
 	// 1. Conexão com Banco
 	connStr := os.Getenv("DATABASE_URL")

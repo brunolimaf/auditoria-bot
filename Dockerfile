@@ -16,6 +16,15 @@ COPY . .
 RUN go build -o main ./cmd/app
 # ============================
 
+# ... (no estágio final FROM alpine:latest)
+
+# Instala o tzdata (base de dados de fusos)
+RUN apk add --no-cache tzdata ca-certificates
+
+# Define a variável de ambiente
+ENV TZ=America/Sao_Paulo
+
+
 # Estágio 2: Execução (Runner)
 FROM alpine:latest
 

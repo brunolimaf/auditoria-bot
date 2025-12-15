@@ -1,10 +1,9 @@
 package repositories
 
 import (
+	"auditor-bot/internal/models"
 	"database/sql"
 	"fmt"
-
-	"auditor-bot/internal/models"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -267,9 +266,9 @@ func (r *AuditoriaRepository) InicializarTabelas() error {
 
 	// 6. Popula Checklist
 	itensPadrao := []string{
-		"licita", "contrato", "despesa", "receita",
+		"licitacao", "contrato", "despesa", "receita",
 		"folha", "diaria", "sic", "ouvidoria",
-		"rreo", "rgf", "obra",
+		"rreo", "rgf", "obra", "diário oficial", "ESTRUTURA ORGANIZACIONAL", "convênio",
 	}
 	for _, item := range itensPadrao {
 		r.DB.Exec(`INSERT INTO checklist (termo) VALUES ($1) ON CONFLICT DO NOTHING`, item)
