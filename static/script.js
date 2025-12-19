@@ -263,20 +263,35 @@ async function executarAuditoria() {
 
 function renderizarTelaResultado(dados) {
   const header = document.getElementById('res-cabecalho');
-  
-  // FIX 1: Pegamos a URL correta que veio do Back-end (Go)
-  // Ela já vem com https://, garantindo que não dê erro de localhost
-  const urlFull = dados.url_alvo; 
 
-  // FIX 2: Criamos uma versão "limpa" apenas para EXIBIÇÃO (Texto bonito)
-  // Removemos 'https://' e 'www.' visualmente, mas mantemos no link real
-  let urlVisual = urlFull.replace(/^https?:\/\//, '').replace(/^www\./, '');
-  // Remove a barra no final se tiver
+  let urlLink = dados.url_alvo;
+
+  // 1. LIMPEZA E CORREÇÃO INTELIGENTE
+  // Removemos protocolo e www para analisar o "miolo" da URL (ex: "barreiras")
+  let urlAnalise = urlLink.toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/$/, ''); // Remove barra no final se tiver
+
+  // 2. DETECÇÃO DE NOME DE CIDADE
+  // Se a URL não tiver nenhum ponto (ex: "barreiras"), assumimos que é um município da BA
+  if (!urlAnalise.includes('.')) {
+      // Reconstrói a URL completa correta
+      urlLink = `https://www.${urlAnalise}.ba.gov.br`;
+  } else {
+      // Se já tem ponto (ex: barreiras.ba.gov.br), só garante o HTTPS
+      if (!urlLink.startsWith('http')) {
+          urlLink = 'https://' + urlLink;
+      }
+  }
+
+  // 3. VISUAL (Para ficar bonito na tela)
+  let urlVisual = urlLink.replace(/^https?:\/\//, '').replace(/^www\./, '');
   if (urlVisual.endsWith('/')) urlVisual = urlVisual.slice(0, -1);
 
   header.innerHTML = `
       <strong>Código:</strong> ${dados.codigo} <span style="margin:0 10px">|</span>
-      <strong>Site:</strong> <a href="${urlFull}" target="_blank" style="color: #3498db; text-decoration: underline;">${urlVisual}</a> <span style="margin:0 10px">|</span>
+      <strong>Site:</strong> <a href="${urlLink}" target="_blank" style="color: #3498db; text-decoration: underline;">${urlVisual}</a> <span style="margin:0 10px">|</span>
       <strong>Data:</strong> ${dados.data}
   `;
 
