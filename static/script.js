@@ -262,51 +262,52 @@ async function executarAuditoria() {
 }
 
 function renderizarTelaResultado(dados) {
-    const header = document.getElementById('res-cabecalho');
+  const header = document.getElementById('res-cabecalho');
+  
+  // FIX 1: Pegamos a URL correta que veio do Back-end (Go)
+  // Ela já vem com https://, garantindo que não dê erro de localhost
+  const urlFull = dados.url_alvo; 
 
-    let municipio = "municipio";
-    try {
-        const urlObj = new URL(urlCompleta.startsWith('http') ? urlCompleta : 'https://' + urlCompleta);
-        const parts = urlObj.hostname.split('.');
-        const ignore = ['www', 'gov', 'br', 'ba', 'sp', 'mg', 'rj'];
-        const candidates = parts.filter(p => !ignore.includes(p));
-        if (candidates.length > 0) municipio = candidates[0];
-    } catch (e) {}
-    
-    header.innerHTML = `
-        <strong>Código:</strong> ${dados.codigo} <span style="margin:0 10px">|</span>
-        <strong>Site:</strong> <a href="${municipio}.ba.gov.br" target="_blank">${municipio}.ba.gov.br</a> <span style="margin:0 10px">|</span>
-        <strong>Data:</strong> ${dados.data}
-    `;
+  // FIX 2: Criamos uma versão "limpa" apenas para EXIBIÇÃO (Texto bonito)
+  // Removemos 'https://' e 'www.' visualmente, mas mantemos no link real
+  let urlVisual = urlFull.replace(/^https?:\/\//, '').replace(/^www\./, '');
+  // Remove a barra no final se tiver
+  if (urlVisual.endsWith('/')) urlVisual = urlVisual.slice(0, -1);
 
-    const grid = document.getElementById('res-itens');
-    grid.innerHTML = '';
+  header.innerHTML = `
+      <strong>Código:</strong> ${dados.codigo} <span style="margin:0 10px">|</span>
+      <strong>Site:</strong> <a href="${urlFull}" target="_blank" style="color: #3498db; text-decoration: underline;">${urlVisual}</a> <span style="margin:0 10px">|</span>
+      <strong>Data:</strong> ${dados.data}
+  `;
 
-    dados.itens.forEach(item => {
-        const div = document.createElement('div');
-        div.className = `result-item ${item.status === 'ENCONTRADO' ? 'encontrado' : 'ausente'}`;
+  const grid = document.getElementById('res-itens');
+  grid.innerHTML = '';
 
-        if(item.status === 'ENCONTRADO') {
-            div.style.borderLeft = "5px solid #27ae60";
-            div.style.backgroundColor = "#eafaf1";
-        } else {
-            div.style.borderLeft = "5px solid #c0392b";
-            div.style.backgroundColor = "#fadbd8";
-        }
-        div.style.padding = "10px";
-        div.style.margin = "5px";
-        div.style.borderRadius = "4px";
-        
-        let html = `<strong>${item.item_procurado.toUpperCase()}</strong><br>`;
-        if (item.status === 'ENCONTRADO') {
-            html += `<span style="color:green; font-weight:bold">✓ ENCONTRADO</span><br>`;
-            html += `<a href="${item.url_encontrada}" target="_blank" style="font-size:0.8em">Abrir Link</a>`;
-        } else {
-            html += `<span style="color:red; font-weight:bold">✕ AUSENTE</span>`;
-        }
-        div.innerHTML = html;
-        grid.appendChild(div);
-    });
+  dados.itens.forEach(item => {
+      const div = document.createElement('div');
+      div.className = `result-item ${item.status === 'ENCONTRADO' ? 'encontrado' : 'ausente'}`;
+
+      if(item.status === 'ENCONTRADO') {
+          div.style.borderLeft = "5px solid #27ae60";
+          div.style.backgroundColor = "#eafaf1";
+      } else {
+          div.style.borderLeft = "5px solid #c0392b";
+          div.style.backgroundColor = "#fadbd8";
+      }
+      div.style.padding = "10px";
+      div.style.margin = "5px";
+      div.style.borderRadius = "4px";
+      
+      let html = `<strong>${item.item_procurado.toUpperCase()}</strong><br>`;
+      if (item.status === 'ENCONTRADO') {
+          html += `<span style="color:green; font-weight:bold">✓ ENCONTRADO</span><br>`;
+          html += `<a href="${item.url_encontrada}" target="_blank" style="font-size:0.8em">Abrir Link</a>`;
+      } else {
+          html += `<span style="color:red; font-weight:bold">✕ AUSENTE</span>`;
+      }
+      div.innerHTML = html;
+      grid.appendChild(div);
+  });
 }
 
 // =========================================================
