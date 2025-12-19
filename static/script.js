@@ -263,9 +263,19 @@ async function executarAuditoria() {
 
 function renderizarTelaResultado(dados) {
     const header = document.getElementById('res-cabecalho');
+
+    let municipio = "municipio";
+    try {
+        const urlObj = new URL(urlCompleta.startsWith('http') ? urlCompleta : 'https://' + urlCompleta);
+        const parts = urlObj.hostname.split('.');
+        const ignore = ['www', 'gov', 'br', 'ba', 'sp', 'mg', 'rj'];
+        const candidates = parts.filter(p => !ignore.includes(p));
+        if (candidates.length > 0) municipio = candidates[0];
+    } catch (e) {}
+    
     header.innerHTML = `
         <strong>Código:</strong> ${dados.codigo} <span style="margin:0 10px">|</span>
-        <strong>Site:</strong> <a href="${dados.url_alvo}" target="_blank">${dados.url_alvo}</a> <span style="margin:0 10px">|</span>
+        <strong>Site:</strong> <a href="${municipio}.ba.gov.br" target="_blank">${municipio}.ba.gov.br</a> <span style="margin:0 10px">|</span>
         <strong>Data:</strong> ${dados.data}
     `;
 
@@ -347,7 +357,7 @@ Este relatório serve como base para abertura de Processo de Fiscalização.
 
 _______________________________
 AUDITORIA DE INFRAESTRUTURA
-SISTEMA SIA - TCM/BA (Simulado)
+SISTEMA SIA - TCM/BA
 `.trim();
 
     document.getElementById('texto-parecer').value = texto;
