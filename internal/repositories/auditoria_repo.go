@@ -220,16 +220,20 @@ func (r *AuditoriaRepository) InicializarTabelas() error {
 		return fmt.Errorf("erro tabela usuarios: %v", err)
 	}
 
-	// 2. Cria Admin Padrão
-	nomeAdmin := "Admin"   // (O nome que você escolheu)
-	senhaAdmin := "123456" // (A senha que você escolheu)
+	// 2. Cria/Atualiza Admin Padrão de forma inteligente (Sem forçar ID)
+	nomeAdmin := "Admin"
+	senhaAdmin := "123456"
 	hashCalculado, _ := bcrypt.GenerateFromPassword([]byte(senhaAdmin), 10)
-	// O 'ON CONFLICT' garante que não duplicará se já existir
-	_, err = r.DB.Exec(`INSERT INTO usuarios (id, username, password_hash, is_admin) 
-             VALUES (2, $1, $2, TRUE) 
-             ON CONFLICT (id) DO NOTHING`, nomeAdmin, string(hashCalculado))
+
+	// 'ON CONFLICT (username)' resolve o problema da nuvem.
+	// Se o usuário não existir, cria. Se já existir, atualiza a senha.
+	_, err = r.DB.Exec(`INSERT INTO usuarios (username, password_hash, is_admin) 
+             VALUES ($1, $2, TRUE) 
+             ON CONFLICT (username) DO UPDATE 
+             SET password_hash = EXCLUDED.password_hash, is_admin = TRUE`,
+		nomeAdmin, string(hashCalculado))
 	if err != nil {
-		fmt.Println("Erro ao criar admin:", err)
+		fmt.Println("Erro ao criar ou atualizar admin:", err)
 	}
 
 	// 3. Cria Tabela Relatórios
