@@ -221,12 +221,13 @@ func (r *AuditoriaRepository) InicializarTabelas() error {
 	}
 
 	// 2. Cria Admin Padrão
-	senhaAdmin := "123456"
+	nomeAdmin := "Admin"   // (O nome que você escolheu)
+	senhaAdmin := "123456" // (A senha que você escolheu)
 	hashCalculado, _ := bcrypt.GenerateFromPassword([]byte(senhaAdmin), 10)
 	// O 'ON CONFLICT' garante que não duplicará se já existir
 	_, err = r.DB.Exec(`INSERT INTO usuarios (id, username, password_hash, is_admin) 
-             VALUES (2, 'Admin', $1, TRUE) 
-             ON CONFLICT (id) DO NOTHING`, string(hashCalculado))
+             VALUES (2, $1, $2, TRUE) 
+             ON CONFLICT (id) DO NOTHING`, nomeAdmin, string(hashCalculado))
 	if err != nil {
 		fmt.Println("Erro ao criar admin:", err)
 	}
