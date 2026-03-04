@@ -33,7 +33,7 @@ func main() {
 	// 1. Conexão com Banco
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
-		connStr = "postgres://auditor:senha_segura@127.0.0.1:5432/auditoria_db?sslmode=disable"
+		connStr = "postgres://auditor:senha_segura@127.0.0.1:5433/auditoria_db?sslmode=disable"
 	}
 
 	db, err := sql.Open("postgres", connStr)
